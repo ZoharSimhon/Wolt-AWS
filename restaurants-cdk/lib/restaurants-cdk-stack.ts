@@ -15,11 +15,11 @@ export class RestaurantsCdkStack extends cdk.Stack {
     const useCacheFlag = true;
 
     // Students TODO Account Details: Change to your account id
-    const labRole = iam.Role.fromRoleArn(this, 'Role', "arn:aws:iam::079553702230:role/LabRole", { mutable: false });
+    const labRole = iam.Role.fromRoleArn(this, 'Role', "arn:aws:iam::717647131692:role/LabRole", { mutable: false });
 
     // Students TODO Account Details: Change the vpcId to the VPC ID of your existing VPC
     const vpc = ec2.Vpc.fromLookup(this, 'VPC', {
-      vpcId: 'vpc-052733467352389cf',
+      vpcId: 'vpc-05202ccf4933811c2',
     });
 
     this.createNatGatewayForPrivateSubnet(vpc);
@@ -78,7 +78,7 @@ export class RestaurantsCdkStack extends cdk.Stack {
     });
   }
 
-  private deployApplicationInfrastructure(deploymentBucket: cdk.aws_s3.Bucket, memcachedConfigurationEndpoint: string, table: cdk.aws_dynamodb.Table, useCacheFlag : boolean, vpc: cdk.aws_ec2.IVpc, labRole: cdk.aws_iam.IRole) {
+  private deployApplicationInfrastructure(deploymentBucket: cdk.aws_s3.Bucket, memcachedConfigurationEndpoint: string, table: cdk.aws_dynamodb.Table, useCacheFlag: boolean, vpc: cdk.aws_ec2.IVpc, labRole: cdk.aws_iam.IRole) {
     const userData = ec2.UserData.forLinux();
     userData.addCommands(
       'yum update -y',
@@ -129,7 +129,7 @@ export class RestaurantsCdkStack extends cdk.Stack {
 
     // Note for students: you may need to change this for scaling testing if you belive that is right
     asg.scaleOnRequestCount('AModestLoad', {
-      targetRequestsPerMinute: 60, 
+      targetRequestsPerMinute: 60,
     });
 
     // Output the DNS where you can access your service
@@ -164,11 +164,23 @@ export class RestaurantsCdkStack extends cdk.Stack {
     // Students TODO: Change the table schema as needed
 
     const table = new dynamodb.Table(this, 'Restaurants', {
-      partitionKey: { name: 'SimpleKey', type: dynamodb.AttributeType.STRING },
+      // partitionKey: { name: 'SimpleKey', type: dynamodb.AttributeType.STRING },
+      partitionKey: { name: 'UniqueName', type: dynamodb.AttributeType.STRING }, // Unique name as partition key
+      sortKey: { name: 'GeoRegion', type: dynamodb.AttributeType.STRING }, // Regional Geo Location as sort key
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       billingMode: dynamodb.BillingMode.PROVISIONED,
       readCapacity: 1, // Note for students: you may need to change this num read capacity for scaling testing if you belive that is right
       writeCapacity: 1, // Note for students: you may need to change this num write capacity for scaling testing if you belive that is right
+    });
+
+    // Add a secondary index for querying by cuisine
+    table.addGlobalSecondaryIndex({
+      indexName: 'CuisineIndex',
+      partitionKey: { name: 'Cuisine', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'Rating', type: dynamodb.AttributeType.NUMBER },
+      projectionType: dynamodb.ProjectionType.ALL,
+      readCapacity: 1, // Adjusted read capacity for the index
+      writeCapacity: 1, // Adjusted write capacity for the index
     });
 
     // Output the table name
