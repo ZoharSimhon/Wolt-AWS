@@ -29,6 +29,7 @@ app.get('/', (req, res) => {
 // Adding a Restaurant
 app.post('/restaurants', async (req, res) => {
     const restaurant = req.body;
+    const cacheKey = `Restaurant-${restaurant.name}`;
 
     const params = {
         TableName: TABLE_NAME,
@@ -44,14 +45,18 @@ app.post('/restaurants', async (req, res) => {
 
     try {
         await dynamodb.put(params).promise();
-        res.send({ success: true }); // Sending the expected response body
+        if (USE_CACHE) {
+            await memcachedActions.addRestaurants(cacheKey, req.body);
+        }
+        res.status(200).send({ success: true });
     } catch (err) {
         if (err.code === 'ConditionalCheckFailedException') {
             res.status(409).send({ success: false, message: 'Restaurant already exists' });
         } else {
-            res.status(500).send({ success: false, message: 'Error adding restaurant: ' + err.message });
+            res.status(500).send({ success: false, message: "Error adding restaurant: " + err.message });
         }
     }
+
     // Students TODO: Implement the logic to add a restaurant
     // res.status(404).send("need to implement");
 });
@@ -59,6 +64,20 @@ app.post('/restaurants', async (req, res) => {
 // Getting a Restaurant by Name
 app.get('/restaurants/:restaurantName', async (req, res) => {
     const restaurantName = req.params.restaurantName;
+    const cacheKey = `Restaurant-${restaurantName}`;
+
+    if (USE_CACHE) {
+        const cachedData = await memcachedActions.getRestaurants(cacheKey);
+        if (cachedData) {
+            const restaurant = {
+                name: cachedData.UniqueName,
+                region: cachedData.GeoRegion,
+                cuisine: cachedData.Cuisine,
+                rating: cachedData.Rating
+            };
+            return res.status(200).send(restaurant); //CHANGE
+        }
+    }
 
     const params = {
         TableName: TABLE_NAME,
@@ -70,19 +89,22 @@ app.get('/restaurants/:restaurantName', async (req, res) => {
     try {
         const result = await dynamodb.get(params).promise();
         if (result.Item) {
-            const item = result.Item
             const restaurant = {
-                cuisine: item.Cuisine,
-                name: item.UniqueName,
-                rating: item.Rating,
-                region: item.GeoRegion,
+                name: result.Item.UniqueName,
+                region: result.Item.GeoRegion,
+                cuisine: result.Item.Cuisine,
+                rating: result.Item.Rating
             };
-            res.send(restaurant);
+
+            if (USE_CACHE) {
+                await memcachedActions.addRestaurants(cacheKey, restaurant);
+            }
+
+            res.status(200).send(restaurant);
         } else {
             res.status(404).send({ success: false, message: "Restaurant not found" });
         }
     } catch (err) {
-        console.log(err.message);
         res.status(500).send({ success: false, message: "Error getting restaurant: " + err.message });
     }
 
@@ -93,6 +115,7 @@ app.get('/restaurants/:restaurantName', async (req, res) => {
 // Deleting a Restaurant by Name
 app.delete('/restaurants/:restaurantName', async (req, res) => {
     const restaurantName = req.params.restaurantName;
+    const cacheKey = `Restaurant-${restaurantName}`;
 
     const params = {
         TableName: TABLE_NAME,
@@ -103,9 +126,14 @@ app.delete('/restaurants/:restaurantName', async (req, res) => {
 
     try {
         await dynamodb.delete(params).promise();
-        res.send({success: true});
+        res.send({ success: true });
     } catch (err) {
         res.status(500).send({ success: false, message: "Error deleting restaurant: " + err.message });
+    }
+
+    // Invalidate cache
+    if (USE_CACHE) {
+        await memcachedActions.deleteRestaurants(cacheKey);
     }
 
     // Students TODO: Implement the logic to delete a restaurant by name
@@ -116,7 +144,7 @@ app.delete('/restaurants/:restaurantName', async (req, res) => {
 app.post('/restaurants/rating', async (req, res) => {
     const restaurantName = req.body.name;
     const rating = req.body.rating;
-
+    const cacheKey = `Restaurant-${restaurantName}`;
 
     const getParams = {
         TableName: TABLE_NAME,
@@ -128,10 +156,10 @@ app.post('/restaurants/rating', async (req, res) => {
     try {
         const result = await dynamodb.get(getParams).promise();
         if (!result.Item) {
-            return res.status(404).send({ success: false, message: "Restaurant not found"});
+            return res.status(404).send({ success: false, message: "Restaurant not found" });
         }
 
-        let newRating = (result.Item.Rating*result.Item.RatingCount + rating) / (result.Item.RatingCount + 1);
+        let newRating = (result.Item.Rating * result.Item.RatingCount + rating) / (result.Item.RatingCount + 1);
         let newRatingCount = result.Item.RatingCount + 1;
 
         const updateParams = {
@@ -148,10 +176,15 @@ app.post('/restaurants/rating', async (req, res) => {
         };
 
         await dynamodb.update(updateParams).promise();
+
+        // Invalidate cache
+        if (USE_CACHE) {
+            await memcachedActions.deleteRestaurants(cacheKey);
+        }
+
         res.send({ success: true });
     } catch (err) {
-        console.log(err.message);
-        res.status(500).send({ success: false, message: "Error updating rating: " + err.message});
+        res.status(500).send({ success: false, message: "Error updating rating: " + err.message });
     }
 
     // Students TODO: Implement the logic to add a rating to a restaurant
@@ -217,8 +250,10 @@ app.get('/restaurants/region/:region', async (req, res) => {
         }));
         res.status(200).send(transformedItems);
     } catch (err) {
-        res.status(500).send({ success: false, 
-                               message: "Error getting restaurants by region: " + err.message });
+        res.status(500).send({
+            success: false,
+            message: "Error getting restaurants by region: " + err.message
+        });
     }
 
     // Students TODO: Implement the logic to get top rated restaurants by region
