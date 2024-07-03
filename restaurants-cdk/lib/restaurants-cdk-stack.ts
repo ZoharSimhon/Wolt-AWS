@@ -166,7 +166,7 @@ export class RestaurantsCdkStack extends cdk.Stack {
     const table = new dynamodb.Table(this, 'Restaurants', {
       // partitionKey: { name: 'SimpleKey', type: dynamodb.AttributeType.STRING },
       partitionKey: { name: 'UniqueName', type: dynamodb.AttributeType.STRING }, // Unique name as partition key
-      sortKey: { name: 'GeoRegion', type: dynamodb.AttributeType.STRING }, // Regional Geo Location as sort key
+      // sortKey: { name: 'GeoRegion', type: dynamodb.AttributeType.STRING }, // Regional Geo Location as sort key
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       billingMode: dynamodb.BillingMode.PROVISIONED,
       readCapacity: 1, // Note for students: you may need to change this num read capacity for scaling testing if you belive that is right

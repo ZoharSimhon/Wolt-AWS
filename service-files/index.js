@@ -21,7 +21,7 @@ app.get('/', (req, res) => {
         MEMCACHED_CONFIGURATION_ENDPOINT: MEMCACHED_CONFIGURATION_ENDPOINT,
         TABLE_NAME: TABLE_NAME,
         AWS_REGION: AWS_REGION,
-        USE_CACHE: USE_CACHE
+        // USE_CACHE: USE_CACHE
     };
     res.send(response);
 });
@@ -33,21 +33,25 @@ app.post('/restaurants', async (req, res) => {
     const params = {
         TableName: TABLE_NAME,
         Item: {
-            UniqueName: restaurant.uniqueName,
-            GeoRegion: restaurant.geoRegion,
-            Rating: restaurant.rating,
-            Cuisine: restaurant.cuisine
+            Cuisine: restaurant.cuisine,
+            UniqueName: restaurant.name,
+            GeoRegion: restaurant.region,
+            Rating: restaurant.rating || 0,
+            RatingCount: restaurant.rating ? 1 : 0
         },
         ConditionExpression: 'attribute_not_exists(UniqueName)'
     };
 
     try {
         await dynamodb.put(params).promise();
-        res.status(201).send("Restaurant added successfully");
+        res.send({ success: true }); // Sending the expected response body
     } catch (err) {
-        res.status(500).send("Error adding restaurant: " + err.message);
+        if (err.code === 'ConditionalCheckFailedException') {
+            res.status(409).send({ success: false, message: 'Restaurant already exists' });
+        } else {
+            res.status(500).send({ success: false, message: 'Error adding restaurant: ' + err.message });
+        }
     }
-
     // Students TODO: Implement the logic to add a restaurant
     // res.status(404).send("need to implement");
 });
@@ -66,12 +70,20 @@ app.get('/restaurants/:restaurantName', async (req, res) => {
     try {
         const result = await dynamodb.get(params).promise();
         if (result.Item) {
-            res.send(result.Item);
+            const item = result.Item
+            const restaurant = {
+                cuisine: item.Cuisine,
+                name: item.UniqueName,
+                rating: item.Rating,
+                region: item.GeoRegion,
+            };
+            res.send(restaurant);
         } else {
-            res.status(404).send("Restaurant not found");
+            res.status(404).send({ success: false, message: "Restaurant not found" });
         }
     } catch (err) {
-        res.status(500).send("Error getting restaurant: " + err.message);
+        console.log(err.message);
+        res.status(500).send({ success: false, message: "Error getting restaurant: " + err.message });
     }
 
     // Students TODO: Implement the logic to get a restaurant by name
@@ -81,7 +93,7 @@ app.get('/restaurants/:restaurantName', async (req, res) => {
 // Deleting a Restaurant by Name
 app.delete('/restaurants/:restaurantName', async (req, res) => {
     const restaurantName = req.params.restaurantName;
-    
+
     const params = {
         TableName: TABLE_NAME,
         Key: {
@@ -91,9 +103,9 @@ app.delete('/restaurants/:restaurantName', async (req, res) => {
 
     try {
         await dynamodb.delete(params).promise();
-        res.send("Restaurant deleted successfully");
+        res.send({success: true});
     } catch (err) {
-        res.status(500).send("Error deleting restaurant: " + err.message);
+        res.status(500).send({ success: false, message: "Error deleting restaurant: " + err.message });
     }
 
     // Students TODO: Implement the logic to delete a restaurant by name
@@ -104,7 +116,7 @@ app.delete('/restaurants/:restaurantName', async (req, res) => {
 app.post('/restaurants/rating', async (req, res) => {
     const restaurantName = req.body.name;
     const rating = req.body.rating;
-    
+
 
     const getParams = {
         TableName: TABLE_NAME,
@@ -116,27 +128,30 @@ app.post('/restaurants/rating', async (req, res) => {
     try {
         const result = await dynamodb.get(getParams).promise();
         if (!result.Item) {
-            return res.status(404).send("Restaurant not found");
+            return res.status(404).send({ success: false, message: "Restaurant not found"});
         }
 
-        let newRating = (result.Item.Rating + rating) / 2;
+        let newRating = (result.Item.Rating*result.Item.RatingCount + rating) / (result.Item.RatingCount + 1);
+        let newRatingCount = result.Item.RatingCount + 1;
 
         const updateParams = {
             TableName: TABLE_NAME,
             Key: {
                 UniqueName: restaurantName
             },
-            UpdateExpression: "set Rating = :r",
+            UpdateExpression: "set Rating = :r, RatingCount = :rc",
             ExpressionAttributeValues: {
-                ":r": newRating
+                ":r": newRating,
+                ":rc": newRatingCount
             },
             ReturnValues: "UPDATED_NEW"
         };
 
         await dynamodb.update(updateParams).promise();
-        res.send("Rating updated successfully");
+        res.send({ success: true });
     } catch (err) {
-        res.status(500).send("Error updating rating: " + err.message);
+        console.log(err.message);
+        res.status(500).send({ success: false, message: "Error updating rating: " + err.message});
     }
 
     // Students TODO: Implement the logic to add a rating to a restaurant
@@ -147,6 +162,7 @@ app.post('/restaurants/rating', async (req, res) => {
 app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
     const cuisine = req.params.cuisine;
     let limit = parseInt(req.query.limit) || 10;
+    if (limit > 100) limit = 100;
 
     const params = {
         TableName: TABLE_NAME,
@@ -161,11 +177,17 @@ app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
 
     try {
         const result = await dynamodb.query(params).promise();
-        res.send(result.Items);
+        const transformedItems = result.Items.map(item => ({
+            name: item.UniqueName,
+            region: item.GeoRegion,
+            cuisine: item.Cuisine,
+            rating: item.Rating
+        }));
+        res.status(200).send(transformedItems);
     } catch (err) {
         res.status(500).send("Error getting restaurants by cuisine: " + err.message);
     }
-    
+
     // Students TODO: Implement the logic to get top rated restaurants by cuisine
     // res.status(404).send("need to implement");
 });
@@ -174,25 +196,31 @@ app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
 app.get('/restaurants/region/:region', async (req, res) => {
     const region = req.params.region;
     let limit = parseInt(req.query.limit) || 10;
+    if (limit > 100) limit = 100;
 
     const params = {
         TableName: TABLE_NAME,
-        IndexName: 'GeoRegionIndex',
-        KeyConditionExpression: 'GeoRegion = :region',
+        FilterExpression: 'GeoRegion = :region',
         ExpressionAttributeValues: {
             ':region': region
         },
-        Limit: limit,
-        ScanIndexForward: false // Descending order by rating
+        Limit: limit
     };
 
     try {
-        const result = await dynamodb.query(params).promise();
-        res.send(result.Items);
+        const result = await dynamodb.scan(params).promise();
+        const transformedItems = result.Items.map(item => ({
+            name: item.UniqueName,
+            region: item.GeoRegion,
+            cuisine: item.Cuisine,
+            rating: item.Rating
+        }));
+        res.status(200).send(transformedItems);
     } catch (err) {
-        res.status(500).send("Error getting restaurants by region: " + err.message);
+        res.status(500).send({ success: false, 
+                               message: "Error getting restaurants by region: " + err.message });
     }
-    
+
     // Students TODO: Implement the logic to get top rated restaurants by region
     // res.status(404).send("need to implement");
 });
@@ -202,32 +230,39 @@ app.get('/restaurants/region/:region/cuisine/:cuisine', async (req, res) => {
     const region = req.params.region;
     const cuisine = req.params.cuisine;
     let limit = parseInt(req.query.limit) || 10;
-    
+    if (limit > 100) limit = 100;
+
     const params = {
         TableName: TABLE_NAME,
-        IndexName: 'GeoRegionCuisineIndex',
-        KeyConditionExpression: 'GeoRegion = :region and Cuisine = :cuisine',
+        IndexName: 'CuisineIndex', // Replace with your actual index name
+        KeyConditionExpression: 'Cuisine = :cuisine',
+        FilterExpression: 'GeoRegion = :region',
         ExpressionAttributeValues: {
-            ':region': region,
-            ':cuisine': cuisine
+            ':cuisine': cuisine,
+            ':region': region
         },
-        Limit: limit,
-        ScanIndexForward: false // Descending order by rating
+        Limit: limit
     };
 
     try {
         const result = await dynamodb.query(params).promise();
-        res.send(result.Items);
+        const transformedItems = result.Items.map(item => ({
+            name: item.UniqueName,
+            region: item.GeoRegion,
+            cuisine: item.Cuisine,
+            rating: item.Rating
+        }));
+        res.status(200).send(transformedItems);
     } catch (err) {
-        res.status(500).send("Error getting restaurants by region and cuisine: " + err.message);
+        res.status(500).send({ success: false, message: "Error getting restaurants by region and cuisine: " + err.message });
     }
 
     // Students TODO: Implement the logic to get top rated restaurants by region and cuisine
     // res.status(404).send("need to implement");
 });
 
-app.listen(80, () => {
-    console.log('Server is running on http://localhost:80');
-});
+// app.listen(80, () => {
+//     console.log('Server is running on http://localhost:80');
+// });
 
 module.exports = { app };
