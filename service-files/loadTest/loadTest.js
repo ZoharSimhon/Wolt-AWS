@@ -6,12 +6,14 @@ const http = require('http');
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: Infinity });
 
 // Configuration
-const endpoint = 'http://Restau-LB8A1-6vzrhRbUKcQa-1820615568.us-east-1.elb.amazonaws.com'; // Set your endpoint URL here
-const requestCount = 1000; // Total number of requests to send
+const endpoint = 'http://Restau-LB8A1-v9We7LCm9VbH-1456625015.us-east-1.elb.amazonaws.com'; // Set your endpoint URL here
+const createCount = 10; // Number of restaurants to create
+const requestCount = 10000; // Total number of GET requests to send
+const concurrencyLevel = 4; // Number of concurrent requests, adjust based on system capacity
 
 // Function to generate a unique restaurant name
 const generateSequentialName = (index) => {
-    return `Restaurant-${index}`;
+    return `Restaurant2-${index}`;
 };
 
 // Function to make an HTTP GET request
@@ -74,45 +76,64 @@ const makeDeleteRequest = (path, done) => {
         });
 };
 
-// Main function to perform the load test sequentially
+// Main function to perform the load test in parallel
 const loadTest = () => {
-    const tasks = [];
+    const createTasks = [];
+    const uniqueNames = [];
 
-    for (let i = 1; i <= requestCount; i++) {
+    // Create restaurants
+    for (let i = 1; i <= createCount; i++) {
         const uniqueName = generateSequentialName(i);
+        uniqueNames.push(uniqueName);
         const restaurantData = {
             name: uniqueName,
             region: 'North',
             cuisine: 'Italian',
             rating: 4.5
         };
-
-        tasks.push(done => makePostRequest('/restaurants', restaurantData, done));
-        tasks.push(done => makeGetRequest(`/restaurants/${uniqueName}`, done));
-        tasks.push(done => makeGetRequest(`/restaurants/${uniqueName}`, done));
+        createTasks.push(done => makePostRequest('/restaurants', restaurantData, done));
     }
 
-    async.series(tasks, (err, results) => {
-        if (err) {
-            console.error('A request failed:', err);
+    // Execute creation tasks in parallel
+    async.parallelLimit(createTasks, concurrencyLevel, (createErr) => {
+        if (createErr) {
+            console.error('A creation request failed:', createErr);
         } else {
-            console.log('All requests completed successfully.');
-            const totalDuration = results.reduce((total, current) => total + current, 0);
-            const averageDuration = totalDuration / results.length;
-            console.log('Average Request Time:', averageDuration, 'ms');
-            
-            // Cleanup function to delete all created restaurants
-            const cleanupTasks = [];
-            for (let i = 1; i <= requestCount; i++) {
-                const uniqueName = generateSequentialName(i);
-                cleanupTasks.push(done => makeDeleteRequest(`/restaurants/${uniqueName}`, done));
+            console.log('All creation requests completed successfully.');
+
+            const getTasks = [];
+
+            // Request restaurants multiple times
+            for (let i = 0; i < requestCount; i++) {
+                const uniqueName = uniqueNames[i % createCount];
+                getTasks.push(done => makeGetRequest(`/restaurants/${uniqueName}`, done));
+                getTasks.push(done => makeGetRequest(`/restaurants/${uniqueName}`, done));
+                getTasks.push(done => makeGetRequest(`/restaurants/${uniqueName}`, done));
             }
-            
-            async.series(cleanupTasks, (cleanupErr, cleanupResults) => {
-                if (cleanupErr) {
-                    console.error('A cleanup request failed:', cleanupErr);
+
+            // Execute GET requests in parallel
+            async.parallelLimit(getTasks, concurrencyLevel, (getErr, getResults) => {
+                if (getErr) {
+                    console.error('A GET request failed:', getErr);
                 } else {
-                    console.log('All cleanup requests completed successfully.');
+                    console.log('All GET requests completed successfully.');
+                    const totalDuration = getResults.reduce((total, current) => total + current, 0);
+                    const averageDuration = totalDuration / getResults.length;
+                    console.log('Average Request Time:', averageDuration, 'ms');
+
+                    // Cleanup function to delete all created restaurants
+                    const cleanupTasks = [];
+                    uniqueNames.forEach(uniqueName => {
+                        cleanupTasks.push(done => makeDeleteRequest(`/restaurants/${uniqueName}`, done));
+                    });
+
+                    async.parallelLimit(cleanupTasks, concurrencyLevel, (cleanupErr) => {
+                        if (cleanupErr) {
+                            console.error('A cleanup request failed:', cleanupErr);
+                        } else {
+                            console.log('All cleanup requests completed successfully.');
+                        }
+                    });
                 }
             });
         }
