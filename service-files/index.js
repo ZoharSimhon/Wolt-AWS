@@ -31,22 +31,25 @@ app.post('/restaurants', async (req, res) => {
     const restaurant = req.body;
     const cacheKey = `Restaurant-${restaurant.name}`;
 
+    const item = {
+        Cuisine: restaurant.cuisine,
+        UniqueName: restaurant.name,
+        GeoRegion: restaurant.region,
+        Rating: restaurant.rating || 0,
+        RatingCount: restaurant.rating ? 1 : 0
+    }
+
     const params = {
         TableName: TABLE_NAME,
-        Item: {
-            Cuisine: restaurant.cuisine,
-            UniqueName: restaurant.name,
-            GeoRegion: restaurant.region,
-            Rating: restaurant.rating || 0,
-            RatingCount: restaurant.rating ? 1 : 0
-        },
+        Item: item,
         ConditionExpression: 'attribute_not_exists(UniqueName)'
     };
 
     try {
         await dynamodb.put(params).promise();
         if (USE_CACHE) {
-            await memcachedActions.addRestaurants(cacheKey, req.body);
+            await memcachedActions.addRestaurants(cacheKey, item);
+            // await memcachedActions.addRestaurants(cacheKey, req.body);
         }
         res.status(200).send({ success: true });
     } catch (err) {

@@ -24,9 +24,9 @@ export class RestaurantsCdkStack extends cdk.Stack {
 
     this.createNatGatewayForPrivateSubnet(vpc);
 
-    // const memcachedConfigurationEndpoint = this.createMemcachedSingleInstaceInPublicSubnetForTestingPurpose(vpc, labRole);
+    const memcachedConfigurationEndpoint = this.createMemcachedSingleInstaceInPublicSubnetForTestingPurpose(vpc, labRole);
     // Students TODO: Comment out the above line and uncomment the below line to use Elasticache, for the testing phase
-    const memcachedConfigurationEndpoint = this.createMemcachedElasticache(vpc, labRole);
+    // const memcachedConfigurationEndpoint = this.createMemcachedElasticache(vpc, labRole);
 
     const table = this.createDynamoDBTable();
 
@@ -164,9 +164,7 @@ export class RestaurantsCdkStack extends cdk.Stack {
     // Students TODO: Change the table schema as needed
 
     const table = new dynamodb.Table(this, 'Restaurants', {
-      // partitionKey: { name: 'SimpleKey', type: dynamodb.AttributeType.STRING },
       partitionKey: { name: 'UniqueName', type: dynamodb.AttributeType.STRING }, // Unique name as partition key
-      // sortKey: { name: 'GeoRegion', type: dynamodb.AttributeType.STRING }, // Regional Geo Location as sort key
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       billingMode: dynamodb.BillingMode.PROVISIONED,
       readCapacity: 1, // Note for students: you may need to change this num read capacity for scaling testing if you belive that is right
