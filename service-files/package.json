@@ -11,7 +11,9 @@
   "description": "",
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.596.0",
+    "async": "^3.2.5",
     "aws-sdk": "^2.1653.0",
+    "axios": "^1.7.2",
     "express": "^4.19.2",
     "memcache-client": "^1.0.5"
   },

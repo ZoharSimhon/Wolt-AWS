@@ -21,7 +21,7 @@ app.get('/', (req, res) => {
         MEMCACHED_CONFIGURATION_ENDPOINT: MEMCACHED_CONFIGURATION_ENDPOINT,
         TABLE_NAME: TABLE_NAME,
         AWS_REGION: AWS_REGION,
-        // USE_CACHE: USE_CACHE
+        USE_CACHE: USE_CACHE
     };
     res.send(response);
 });
@@ -299,8 +299,8 @@ app.get('/restaurants/region/:region/cuisine/:cuisine', async (req, res) => {
     // res.status(404).send("need to implement");
 });
 
-// app.listen(80, () => {
-//     console.log('Server is running on http://localhost:80');
-// });
+app.listen(80, () => {
+    console.log('Server is running on http://localhost:80');
+});
 
 module.exports = { app };
